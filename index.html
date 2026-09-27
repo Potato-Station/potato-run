@@ -707,14 +707,22 @@ function isPreview(){ return location.protocol==='file:' || /claude|anthropic|lo
 async function fetchNumber(){
   // previews and local tests never write to the real sheet
   if(isPreview()){ const n=(ls.get('ps_potatorun_demo_n3')||0)+1; ls.set('ps_potatorun_demo_n3',n); return {n,demo:true}; }
-  // one request only (no auto-retry) so a slow reply can't create a duplicate row
-  const c=new AbortController(); const tm=setTimeout(()=>c.abort(),20000);
-  try{
-    const r=await fetch(SHEET_URL+'?t='+Date.now(),{cache:'no-store',redirect:'follow',signal:c.signal});
-    const j=await r.json(); const n=Number(j&&j.n);
-    if(j&&j.ok&&Number.isFinite(n)&&n>0) return {n,code:j.code,at:j.at,demo:false};
-  } finally { clearTimeout(tm); }
+  // one request only (no auto-retry) so a slow reply can't create a duplicate row.
+  // JSONP (script tag) instead of fetch: no cross-site blocking on any phone browser.
+  const j=await jsonp(SHEET_URL, 25000); const n=Number(j&&j.n);
+  if(j&&j.ok&&Number.isFinite(n)&&n>0) return {n,code:j.code,at:j.at,demo:false};
   throw new Error('sheet unavailable');
+}
+function jsonp(url, ms){
+  return new Promise((resolve,reject)=>{
+    const cb='psCb'+Date.now()+Math.floor(Math.random()*1e6); const s=document.createElement('script');
+    let done=false; const end=()=>{ done=true; clearTimeout(tm); try{ delete window[cb]; }catch(e){ window[cb]=undefined; } s.remove(); };
+    const tm=setTimeout(()=>{ if(!done){ end(); reject(new Error('timeout')); } }, ms);
+    window[cb]=data=>{ if(done) return; end(); resolve(data); };
+    s.onerror=()=>{ if(!done){ end(); reject(new Error('load error')); } };
+    s.src=url+(url.includes('?')?'&':'?')+'callback='+cb+'&t='+Date.now();
+    document.head.appendChild(s);
+  });
 }
 function makeClaim(n,demo,code,at){
   const d=new Date(), p=(x,l)=>String(x).padStart(l||2,'0');
